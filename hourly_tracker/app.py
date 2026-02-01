@@ -4,7 +4,7 @@ import os
 import sys
 import threading
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -14,22 +14,17 @@ from docx import Document
 import pystray
 
 import json
-from dataclasses import dataclass, field
 
-APP_NAME = "HourlyTracker"
+from hourly_tracker.paths import get_appdata_dir, get_default_expenses_path, get_docs_dir, is_test_profile
+from hourly_tracker.first_run import ensure_user_files_exist
 
 
 def _default_state_dir() -> Path:
-    appdata = os.environ.get("APPDATA")
-    if not appdata:
-        return Path.cwd() / APP_NAME
-    return Path(appdata) / APP_NAME
+    return get_appdata_dir()
 
 
 def _default_data_dir() -> Path:
-    home = Path(os.environ.get("USERPROFILE") or Path.home())
-    docs = home / "Documents"
-    return docs / APP_NAME
+    return get_docs_dir()
 
 
 def ensure_dir(p: Path) -> Path:
@@ -61,7 +56,7 @@ class Config:
     config_path: Path | None = None
     log_lock_path: Path | None = None
     reflections_dir: Path | None = None
-    expenses_path: Path | None = Path(r"C:\Users\antho\OneDrive\Desktop\Expenses.xlsx")
+    expenses_path: Path | None = field(default_factory=get_default_expenses_path)
 
     reflection_enabled: bool = True
     reflection_time_local: str = "23:30"
@@ -135,7 +130,7 @@ def load_config() -> Config:
         except Exception:
             pass
     # Always enforce hardcoded expenses path per user request.
-    cfg.expenses_path = Path(r"C:\Users\antho\OneDrive\Desktop\Expenses.xlsx")
+    cfg.expenses_path = get_default_expenses_path()
     return cfg
 
 
@@ -434,9 +429,8 @@ def _log_spending(ctx: AppContext) -> None:
 
     cfg = ctx.cfg
     cfg.resolve_paths()
-    expenses_path = cfg.expenses_path
-    if not expenses_path:
-        return
+    _, expenses_path = ensure_user_files_exist()
+    cfg.expenses_path = expenses_path
     data = {
         "date": date.today(),
         "type": result.spending_input.entry_type,
@@ -454,7 +448,11 @@ def _log_spending(ctx: AppContext) -> None:
             notes=data["notes"],
         )
     except PermissionError:
+        ctx.notifier.notify("Hourly Tracker", "Close Expenses.xlsx in Excel, then retry.")
         ctx.dialog_runner.run(lambda root: error_dialog(root, "Close Expenses.xlsx", "Please close Expenses.xlsx in Excel and try again."))
+    except OSError as exc:
+        ctx.notifier.notify("Hourly Tracker", "Expenses.xlsx is locked; close it and retry.")
+        _log_event(cfg, f"log_spending locked error {exc}")
     except Exception:
         _log_event(cfg, f"log_spending error\n{traceback.format_exc()}")
         ctx.dialog_runner.run(lambda root: error_dialog(root, "Spending log failed", "Could not append to Expenses.xlsx. Check app.log for details."))
@@ -632,6 +630,14 @@ def _ensure_shortcuts_once(ctx: AppContext) -> None:
 
 def _build_context() -> AppContext:
     cfg = load_config()
+
+    # Ensure per-user working files are present in the profile docs dir.
+    time_log_path, expenses_path = ensure_user_files_exist()
+    cfg.data_dir = time_log_path.parent
+    cfg.log_path = time_log_path
+    cfg.expenses_path = expenses_path
+    cfg.reflections_dir = cfg.data_dir / "reflections"
+
     _self_check_paths(cfg)
     save_config(cfg)
 
@@ -670,10 +676,12 @@ def _build_context() -> AppContext:
 def run_tray_app() -> None:
     ctx = _build_context()
 
+    tray_title = "Hourly Tracker (TEST)" if is_test_profile() else "Hourly Tracker"
+
     icon = pystray.Icon(
         "hourly-tracker",
         _create_icon(),
-        "Hourly Tracker",
+        tray_title,
         menu=pystray.Menu(
             pystray.MenuItem("Log now", lambda: _prompt_once(ctx, prompt_type="manual")),
             pystray.MenuItem("Snooze 10m", lambda: ctx.scheduler.snooze(ctx.cfg.snooze_minutes)),

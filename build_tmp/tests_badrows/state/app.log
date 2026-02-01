@@ -1,0 +1,2 @@
+[2026-02-01T21:49:34] write_analytics log_path=C:\Code\GitHub\Time-Management-Delivereable\Time-Management-Delivereable\build_tmp\tests_badrows\data\time_log.xlsx report_path=C:\Code\GitHub\Time-Management-Delivereable\Time-Management-Delivereable\build_tmp\tests_badrows\data\report.html entries=1
+[2026-02-01T21:49:34] entries headers=['id', 'timestamp', 'activity', 'notes', 'category', 'energy', 'focus', 'prompt_type', 'start_time', 'end_time', 'created_at']

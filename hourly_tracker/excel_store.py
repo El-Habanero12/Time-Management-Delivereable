@@ -13,6 +13,7 @@ import msvcrt
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from hourly_tracker.first_run import ensure_user_files_exist
 ENTRIES_SHEET = "Entries"
 LOOKUP_SHEET = "Lookup"
 TASKS_SHEET = "Tasks"
@@ -560,8 +561,15 @@ def _next_empty_row(ws: Worksheet, start_row: int) -> int:
     return ws.max_row + 1 if ws.max_row >= start_row else start_row
 
 
+def _user_expenses_path(_: Optional[Path]) -> Path:
+    """Always resolve to the profile's Expenses workbook, ensuring it exists."""
+    _, expenses_path = ensure_user_files_exist()
+    return expenses_path
+
+
 def append_to_expenses_workbook(expenses_path: Path, data: Dict[str, object], lock_path: Optional[Path] = None) -> None:
     """Append a single expense row while preserving any existing formatting."""
+    expenses_path = _user_expenses_path(expenses_path)
     lock = _lock_path(expenses_path, lock_path)
     with file_lock(lock):
         if expenses_path.exists():
@@ -696,7 +704,7 @@ def upsert_daily_row(
     notes: str,
 ) -> None:
     """Fill or update the row for entry_date; accumulate amount and append notes."""
-    expenses_path = _as_path(expenses_path)
+    expenses_path = _user_expenses_path(expenses_path)
     lock = _lock_path(expenses_path, None)
     with file_lock(lock):
         wb = load_workbook(expenses_path)

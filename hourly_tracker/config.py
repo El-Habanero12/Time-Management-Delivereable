@@ -1,33 +1,26 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
-APP_NAME = "HourlyTracker"
+from hourly_tracker.paths import get_appdata_dir, get_default_expenses_path, get_docs_dir
 
 
 def _default_state_dir() -> Path:
-    """Internal state lives under %APPDATA% by default."""
-    appdata = os.environ.get("APPDATA")
-    if not appdata:
-        # Fallback to local repo directory if APPDATA is unavailable.
-        return Path.cwd() / APP_NAME
-    return Path(appdata) / APP_NAME
+    """Internal state lives under %APPDATA% by default (profile-aware)."""
+    return get_appdata_dir()
 
 
 def _default_data_dir() -> Path:
-    """User-facing files default to Documents\\HourlyTracker."""
-    home = Path(os.environ.get("USERPROFILE") or Path.home())
-    docs = home / "Documents"
-    return docs / APP_NAME
+    """User-facing files default to Documents\\HourlyTracker (profile-aware)."""
+    return get_docs_dir()
 
 
 def _default_expenses_path() -> Path:
     """Explicit default for spending log workbook."""
-    return Path(r"C:\Users\antho\OneDrive\Desktop\Expenses.xlsx")
+    return get_default_expenses_path()
 
 
 def ensure_app_dirs(base_dir: Path) -> Path:
