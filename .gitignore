@@ -1,0 +1,18 @@
+# Python / venv
+.venv/
+__pycache__/
+
+# PyInstaller outputs
+build/
+dist/
+build_tmp/
+
+# Logs / temp
+logs/
+*.log
+*.tmp
+*.lock
+
+# IDE
+.vscode/
+.idea/

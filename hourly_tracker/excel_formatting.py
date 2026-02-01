@@ -14,7 +14,10 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-from .analytics import entries_to_blocks
+try:
+    from .analytics import entries_to_blocks
+except Exception:  # analytics optional
+    entries_to_blocks = None  # type: ignore
 from typing import Any
 from .excel_store import (
     ENTRIES_COLUMNS,
@@ -109,6 +112,9 @@ def _conditional_formatting(ws_entries) -> None:
 
 
 def _weekly_category_matrix(cfg: Any, entries_override: Optional[List[dict]] = None) -> Tuple[List[str], List[str], Dict[Tuple[str, str], float]]:
+    if entries_to_blocks is None or not getattr(cfg, "analytics_enabled", True):
+        return [], [], {}
+
     entries = entries_override if entries_override is not None else read_entries(cfg.log_path, lock_path=cfg.log_lock_path)
     blocks, _ = entries_to_blocks(entries, cfg)
 

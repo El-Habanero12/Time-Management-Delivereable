@@ -159,6 +159,9 @@ def _atomic_save(wb: Workbook, target_path: Path) -> None:
     try:
         wb.save(tmp_path)
         os.replace(tmp_path, target_path)
+    except OSError as exc:
+        _raise_if_locked(exc)
+        raise
     finally:
         if tmp_path.exists():
             try:
@@ -563,8 +566,8 @@ def _next_empty_row(ws: Worksheet, start_row: int) -> int:
 
 def _user_expenses_path(_: Optional[Path]) -> Path:
     """Always resolve to the profile's Expenses workbook, ensuring it exists."""
-    _, expenses_path = ensure_user_files_exist()
-    return expenses_path
+    files = ensure_user_files_exist()
+    return files["expenses"]
 
 
 def append_to_expenses_workbook(expenses_path: Path, data: Dict[str, object], lock_path: Optional[Path] = None) -> None:
@@ -807,3 +810,11 @@ def upsert_daily_row(
                     )
 
         _atomic_save(wb, expenses_path)
+class WorkbookLockedError(PermissionError):
+    """Raised when a workbook cannot be written due to file locks."""
+
+
+def _raise_if_locked(exc: OSError) -> None:
+    winerr = getattr(exc, "winerror", None)
+    if isinstance(exc, PermissionError) or winerr in (5, 32):
+        raise WorkbookLockedError(str(exc))

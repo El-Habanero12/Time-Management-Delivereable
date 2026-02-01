@@ -3,10 +3,12 @@
 
 a = Analysis(
     ['run_hourly_tracker.py'],
-    # Ensure PyInstaller searches within the project and venv we build with.
-    pathex=[r'C:\\Code\\GitHub\\Time-Management'],
+    pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('hourly_tracker/resources/time_log_template.xlsx', 'resources'),
+        ('hourly_tracker/resources/Expenses.xlsx', 'resources'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

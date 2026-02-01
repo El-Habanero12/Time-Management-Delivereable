@@ -49,6 +49,7 @@ class Config:
     llm_timeout_seconds: int = 20
 
     no_network_mode: bool = True
+    analytics_enabled: bool = True
 
     # Directories
     state_dir: Path = field(default_factory=_default_state_dir)

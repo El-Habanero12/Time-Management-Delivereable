@@ -30,7 +30,7 @@ TASK_HISTORY_SHEET = "Task_History"
 def _log_info(cfg: Config, message: str) -> None:
     try:
         cfg.resolve_paths()
-        log_path = cfg.state_dir / "app.log"
+        log_path = cfg.state_dir / "logs" / "app.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().isoformat(timespec="seconds")
         with log_path.open("a", encoding="utf-8") as fh:
@@ -43,7 +43,7 @@ def _log_warn(cfg: Config, message: str) -> None:
     """Lightweight logger writing to state_dir/app.log without failing analytics."""
     try:
         cfg.resolve_paths()
-        log_path = cfg.state_dir / "app.log"
+        log_path = cfg.state_dir / "logs" / "app.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().isoformat(timespec="seconds")
         with log_path.open("a", encoding="utf-8") as fh:
@@ -346,6 +346,11 @@ def _upsert_sheet(wb: Workbook, name: str, headers: List[str], rows: List[List[o
 
 
 def write_analytics(cfg: Config) -> tuple[Path, datetime, List[dict]]:
+    if not getattr(cfg, "analytics_enabled", True):
+        now = datetime.now()
+        fallback_path = cfg.report_path or (cfg.data_dir / "report.html")
+        return fallback_path, now, []
+
     cfg = _coerce_cfg_paths(cfg)
     cfg.resolve_paths()
     assert cfg.log_path is not None

@@ -41,3 +41,18 @@ def get_docs_dir() -> Path:
 def get_default_expenses_path() -> Path:
     """Default location for the user's spending workbook (profile-aware)."""
     return get_docs_dir() / "Expenses.xlsx"
+
+
+def get_user_time_log_path() -> Path:
+    """Profile-aware per-user time log workbook path."""
+    return get_docs_dir() / "time_log.xlsx"
+
+
+def get_user_expenses_path() -> Path:
+    """Profile-aware per-user expenses workbook path."""
+    return get_docs_dir() / "Expenses.xlsx"
+
+
+def get_docs_reflections_dir() -> Path:
+    """Profile-aware reflections directory under Documents."""
+    return get_docs_dir() / "reflections"

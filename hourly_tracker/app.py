@@ -4,7 +4,7 @@ import os
 import sys
 import threading
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -15,8 +15,18 @@ import pystray
 
 import json
 
-from hourly_tracker.paths import get_appdata_dir, get_default_expenses_path, get_docs_dir, is_test_profile
+from hourly_tracker.paths import (
+    get_appdata_dir,
+    get_default_expenses_path,
+    get_docs_dir,
+    get_docs_reflections_dir,
+    get_user_expenses_path,
+    get_user_time_log_path,
+    is_test_profile,
+)
 from hourly_tracker.first_run import ensure_user_files_exist
+from hourly_tracker.excel_store import WorkbookLockedError
+from hourly_tracker.config import AnalyticsRules
 
 
 def _default_state_dir() -> Path:
@@ -46,6 +56,7 @@ class Config:
     llm_timeout_seconds: int = 20
 
     no_network_mode: bool = True
+    analytics_enabled: bool = True
 
     state_dir: Path = field(default_factory=_default_state_dir)
     data_dir: Path = field(default_factory=_default_data_dir)
@@ -57,6 +68,7 @@ class Config:
     log_lock_path: Path | None = None
     reflections_dir: Path | None = None
     expenses_path: Path | None = field(default_factory=get_default_expenses_path)
+    analytics_rules: AnalyticsRules = field(default_factory=AnalyticsRules)
 
     reflection_enabled: bool = True
     reflection_time_local: str = "23:30"
@@ -124,6 +136,8 @@ def load_config() -> Config:
                             setattr(cfg, key, Path(val))
                         except Exception:
                             setattr(cfg, key, val)
+                    elif key == "analytics_rules" and isinstance(val, dict):
+                        cfg.analytics_rules = AnalyticsRules(**val)
                     else:
                         setattr(cfg, key, val)
             cfg.resolve_paths()
@@ -143,6 +157,8 @@ def save_config(cfg: Config) -> None:
     if p:
         p.parent.mkdir(parents=True, exist_ok=True)
         payload = cfg.__dict__.copy()
+        if isinstance(payload.get("analytics_rules"), AnalyticsRules):
+            payload["analytics_rules"] = asdict(payload["analytics_rules"])
         for k, v in list(payload.items()):
             if isinstance(v, Path):
                 payload[k] = str(v)
@@ -208,11 +224,19 @@ def _create_icon() -> Image.Image:
 def _log_event(cfg: Config, message: str) -> None:
     try:
         cfg.resolve_paths()
-        log_path = cfg.state_dir / "app.log"
+        log_path = cfg.state_dir / "logs" / "app.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().isoformat(timespec="seconds")
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass
+
+
+def _notify_locked(ctx: AppContext, path: Path, exc: Exception) -> None:
+    _log_event(ctx.cfg, f"Workbook locked: {path} -> {exc}")
+    try:
+        ctx.notifier.notify("Hourly Tracker", f"Close {path.name} in Excel, then retry.")
     except Exception:
         pass
 
@@ -315,8 +339,11 @@ def _persist_prompt(ctx: AppContext, prompt_input: PromptInput) -> None:
     )
     assert ctx.cfg.log_path is not None
     categories = _available_categories(ctx.cfg)
-    append_entry(ctx.cfg.log_path, entry, categories=categories, lock_path=ctx.cfg.log_lock_path)
-    ctx.scheduler.mark_entry(prompt_input.timestamp)
+    try:
+        append_entry(ctx.cfg.log_path, entry, categories=categories, lock_path=ctx.cfg.log_lock_path)
+        ctx.scheduler.mark_entry(prompt_input.timestamp)
+    except WorkbookLockedError as exc:
+        _notify_locked(ctx, ctx.cfg.log_path, exc)
 
 
 def _persist_task_updates(ctx: AppContext, prompt_input: PromptInput) -> None:
@@ -325,7 +352,11 @@ def _persist_task_updates(ctx: AppContext, prompt_input: PromptInput) -> None:
 
     new_tasks = prompt_input.new_tasks or []
     if new_tasks:
-        add_tasks(ctx.cfg.log_path, new_tasks, lock_path=ctx.cfg.log_lock_path)
+        try:
+            add_tasks(ctx.cfg.log_path, new_tasks, lock_path=ctx.cfg.log_lock_path)
+        except WorkbookLockedError as exc:
+            _notify_locked(ctx, ctx.cfg.log_path, exc)
+            return
 
     worked_ids = set(prompt_input.worked_task_ids or [])
     completed_ids = set(prompt_input.completed_task_ids or [])
@@ -335,28 +366,36 @@ def _persist_task_updates(ctx: AppContext, prompt_input: PromptInput) -> None:
     could_be_faster = bool(prompt_input.task_could_be_faster)
 
     for task_id in worked_ids:
-        log_task_event(
-            ctx.cfg.log_path,
-            task_id=task_id,
-            action="worked",
-            minutes=minutes,
-            effort=effort,
-            could_be_faster=could_be_faster,
-            notes="",
-            lock_path=ctx.cfg.log_lock_path,
-        )
+        try:
+            log_task_event(
+                ctx.cfg.log_path,
+                task_id=task_id,
+                action="worked",
+                minutes=minutes,
+                effort=effort,
+                could_be_faster=could_be_faster,
+                notes="",
+                lock_path=ctx.cfg.log_lock_path,
+            )
+        except WorkbookLockedError as exc:
+            _notify_locked(ctx, ctx.cfg.log_path, exc)
+            return
 
     for task_id in completed_ids:
-        log_task_event(
-            ctx.cfg.log_path,
-            task_id=task_id,
-            action="completed",
-            minutes=minutes,
-            effort=effort,
-            could_be_faster=could_be_faster,
-            notes="",
-            lock_path=ctx.cfg.log_lock_path,
-        )
+        try:
+            log_task_event(
+                ctx.cfg.log_path,
+                task_id=task_id,
+                action="completed",
+                minutes=minutes,
+                effort=effort,
+                could_be_faster=could_be_faster,
+                notes="",
+                lock_path=ctx.cfg.log_lock_path,
+            )
+        except WorkbookLockedError as exc:
+            _notify_locked(ctx, ctx.cfg.log_path, exc)
+            return
 
 
 def _catch_up(ctx: AppContext, hours_missed: int) -> None:
@@ -415,8 +454,12 @@ def _catch_up(ctx: AppContext, hours_missed: int) -> None:
 
     assert ctx.cfg.log_path is not None
     for entry in entries:
-        append_entry(ctx.cfg.log_path, entry, categories=categories, lock_path=ctx.cfg.log_lock_path)
-        ctx.scheduler.mark_entry(entry.timestamp)
+        try:
+            append_entry(ctx.cfg.log_path, entry, categories=categories, lock_path=ctx.cfg.log_lock_path)
+            ctx.scheduler.mark_entry(entry.timestamp)
+        except WorkbookLockedError as exc:
+            _notify_locked(ctx, ctx.cfg.log_path, exc)
+            break
 
 
 def _log_spending(ctx: AppContext) -> None:
@@ -429,7 +472,8 @@ def _log_spending(ctx: AppContext) -> None:
 
     cfg = ctx.cfg
     cfg.resolve_paths()
-    _, expenses_path = ensure_user_files_exist()
+    files = ensure_user_files_exist()
+    expenses_path = files["expenses"]
     cfg.expenses_path = expenses_path
     data = {
         "date": date.today(),
@@ -447,6 +491,8 @@ def _log_spending(ctx: AppContext) -> None:
             method=data["payment_method"],
             notes=data["notes"],
         )
+    except WorkbookLockedError as exc:
+        _notify_locked(ctx, expenses_path, exc)
     except PermissionError:
         ctx.notifier.notify("Hourly Tracker", "Close Expenses.xlsx in Excel, then retry.")
         ctx.dialog_runner.run(lambda root: error_dialog(root, "Close Expenses.xlsx", "Please close Expenses.xlsx in Excel and try again."))
@@ -502,6 +548,8 @@ def _save_reflection(ctx: AppContext, reflection: ReflectionInput) -> Path:
                 stamp,
                 None,
             )
+    except WorkbookLockedError as exc:
+        _notify_locked(ctx, cfg.log_path or doc_path, exc)
     except Exception:
         _log_event(cfg, f"reflection index update failed\n{traceback.format_exc()}")
 
@@ -543,27 +591,30 @@ def _open_task_manager(ctx: AppContext) -> None:
         return
 
     if ctx.cfg.log_path:
-        if result.added_tasks:
-            add_tasks(ctx.cfg.log_path, result.added_tasks, lock_path=ctx.cfg.log_lock_path)
-        for update in result.updated:
-            update_task_fields(
-                ctx.cfg.log_path,
-                update.get("id"),
-                title=update.get("title"),
-                notes=update.get("notes"),
-                lock_path=ctx.cfg.log_lock_path,
-            )
-        for task_id in result.completed_task_ids:
-            log_task_event(
-                ctx.cfg.log_path,
-                task_id=task_id,
-                action="completed",
-                minutes=0,
-                effort=3,
-                could_be_faster=False,
-                notes="",
-                lock_path=ctx.cfg.log_lock_path,
-            )
+        try:
+            if result.added_tasks:
+                add_tasks(ctx.cfg.log_path, result.added_tasks, lock_path=ctx.cfg.log_lock_path)
+            for update in result.updated:
+                update_task_fields(
+                    ctx.cfg.log_path,
+                    update.get("id"),
+                    title=update.get("title"),
+                    notes=update.get("notes"),
+                    lock_path=ctx.cfg.log_lock_path,
+                )
+            for task_id in result.completed_task_ids:
+                log_task_event(
+                    ctx.cfg.log_path,
+                    task_id=task_id,
+                    action="completed",
+                    minutes=0,
+                    effort=3,
+                    could_be_faster=False,
+                    notes="",
+                    lock_path=ctx.cfg.log_lock_path,
+                )
+        except WorkbookLockedError as exc:
+            _notify_locked(ctx, ctx.cfg.log_path, exc)
 
 
 def _create_windows_shortcut(shortcut_path: Path, target_path: Path) -> None:
@@ -632,11 +683,11 @@ def _build_context() -> AppContext:
     cfg = load_config()
 
     # Ensure per-user working files are present in the profile docs dir.
-    time_log_path, expenses_path = ensure_user_files_exist()
-    cfg.data_dir = time_log_path.parent
-    cfg.log_path = time_log_path
-    cfg.expenses_path = expenses_path
-    cfg.reflections_dir = cfg.data_dir / "reflections"
+    files = ensure_user_files_exist()
+    cfg.data_dir = files["docs_dir"]
+    cfg.log_path = files["time_log"]
+    cfg.expenses_path = files["expenses"]
+    cfg.reflections_dir = files["reflections_dir"]
 
     _self_check_paths(cfg)
     save_config(cfg)
@@ -645,7 +696,12 @@ def _build_context() -> AppContext:
         enforce_no_network(allow_loopback=True)
 
     assert cfg.log_path is not None
-    ensure_workbook(cfg.log_path, lock_path=cfg.log_lock_path)
+    try:
+        ensure_workbook(cfg.log_path, lock_path=cfg.log_lock_path)
+    except WorkbookLockedError as exc:
+        _log_event(cfg, f"Workbook locked on startup: {exc}")
+        notifier = Notifier()
+        notifier.notify("Hourly Tracker", "Close time_log.xlsx and restart to continue logging.")
 
     categories = _available_categories(cfg)
     suggester = _build_suggester(cfg, categories)
