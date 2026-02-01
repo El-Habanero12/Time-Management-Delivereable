@@ -6,12 +6,19 @@ __pycache__/
 build/
 dist/
 build_tmp/
+dist_tmp/
 
 # Logs / temp
 logs/
 *.log
 *.tmp
 *.lock
+
+# User/output files created in repo root
+/time_log.xlsx
+/Expenses.xlsx
+/report.html
+/reflections/
 
 # IDE
 .vscode/

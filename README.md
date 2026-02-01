@@ -1,22 +1,21 @@
 # HourlyTracker
 
-## For users
-- Download the packaged `HourlyTracker.exe` (PyInstaller build).
-- Run the EXE; no Python required.
-- Data locations (NORMAL mode):
+## For Users
+- Download and run `HourlyTracker.exe` (no Python required).
+- Storage (NORMAL mode):
   - State/config/logs: `%APPDATA%\HourlyTracker`
   - User files: `%USERPROFILE%\Documents\HourlyTracker`
-    - `time_log.xlsx` (first run copies from template)
-    - `Expenses.xlsx` (Tracker sheet; first run copies from template)
+    - `time_log.xlsx` (copied from template on first run)
+    - `Expenses.xlsx` (Tracker sheet; copied from template on first run)
     - `reflections\*.docx`
-- TEST mode: set environment variable `HOURLYTRACKER_PROFILE=TEST` before launching; folders become `%APPDATA%\HourlyTracker_TEST` and `Documents\HourlyTracker_TEST`.
+- TEST mode: set `HOURLYTRACKER_PROFILE=TEST` before launching; folders become `%APPDATA%\HourlyTracker_TEST` and `Documents\HourlyTracker_TEST`.
+- If Excel says a workbook is open/locked, close it and retry; the tray app will stay running and notify you.
 
-## For developers
-- Create a virtual environment and install requirements:
+## For Developers
+- Create a venv and install deps:
   - `py -3 -m venv .venv`
   - `.venv\Scripts\activate`
   - `pip install -r requirements.txt`
-- Run the tray app in dev: `python run_hourly_tracker.py`
-- Build a standalone EXE:
-  - `pyinstaller HourlyTracker.spec`
-  - Artifacts appear under `dist/HourlyTracker/` (onedir) or `dist/HourlyTracker.exe` (onefile, if configured).
+- Run in dev: `python run_hourly_tracker.py`
+- Build: `pyinstaller HourlyTracker.spec` or `powershell -ExecutionPolicy Bypass -File scripts/build.ps1`
+- Run built EXE in TEST mode by setting `HOURLYTRACKER_PROFILE=TEST` in your shell before launching.
